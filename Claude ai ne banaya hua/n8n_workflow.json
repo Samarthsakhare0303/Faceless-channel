@@ -1,0 +1,131 @@
+{
+  "name": "YouTube Video Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "generate-video",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "youtube-video-gen"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.github.com/repos/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME/dispatches",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "event_type",
+              "value": "generate-video"
+            }
+          ]
+        },
+        "jsonParameters": true,
+        "bodyParametersJson": "={\n  \"event_type\": \"generate-video\",\n  \"client_payload\": {\n    \"topic\": \"{{ $json.body.topic }}\",\n    \"voice\": \"{{ $json.body.voice || 'en-US-AriaNeural' }}\",\n    \"keywords\": \"{{ $json.body.keywords || '' }}\",\n    \"n8n_callback_url\": \"{{ $json.body.callback_url || '' }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "github-dispatch",
+      "name": "Trigger GitHub Actions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"queued\",\n  \"message\": \"Video generation started on GitHub Actions\",\n  \"topic\": \"{{ $('Webhook Trigger').item.json.body.topic }}\"\n}",
+        "options": {}
+      },
+      "id": "respond",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "path": "video-done",
+        "options": {}
+      },
+      "id": "callback-receiver",
+      "name": "Receive Video Done",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 520],
+      "webhookId": "video-done-callback",
+      "notes": "GitHub Actions calls this URL when video is ready. Set n8n_callback_url to this webhook's URL."
+    },
+    {
+      "parameters": {
+        "operation": "send",
+        "fromEmail": "your@email.com",
+        "toEmail": "your@email.com",
+        "subject": "=🎬 New Video Ready: {{ $json.body.topic }}",
+        "message": "=Your faceless YouTube video is ready!\n\nTopic: {{ $json.body.topic }}\nGoogle Drive: {{ $json.body.gdrive_link }}\nGitHub Run: {{ $json.body.artifact_url }}\n\nDownload and upload to YouTube!"
+      },
+      "id": "email-notify",
+      "name": "Email Notification",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [460, 520],
+      "notes": "Optional: notifies you by email when video is done"
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Trigger GitHub Actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger GitHub Actions": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Receive Video Done": {
+      "main": [
+        [
+          {
+            "node": "Email Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,118 @@
+name: 🎬 Generate Faceless Video
+
+on:
+  # Triggered by n8n via GitHub API
+  repository_dispatch:
+    types: [generate-video]
+
+  # Or manually from GitHub UI
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: "Video topic OR full script text"
+        required: true
+        default: "10 Amazing Facts About Space"
+        type: string
+      voice:
+        description: "TTS voice (see README for full list)"
+        required: false
+        default: "en-US-AriaNeural"
+        type: string
+      keywords:
+        description: "Comma-separated footage keywords (optional, auto-extracted if blank)"
+        required: false
+        default: ""
+        type: string
+      n8n_callback_url:
+        description: "n8n webhook URL to notify when done (optional)"
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  generate-video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      # ─── Setup ────────────────────────────────────────────────────────────
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 🎞️ Install FFmpeg + fonts
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg fonts-open-sans
+
+      - name: 📦 Install Python dependencies
+        run: pip install -r requirements.txt
+
+      # ─── Resolve inputs (works for both dispatch types) ────────────────────
+      - name: 📋 Resolve inputs
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "topic=${{ github.event.client_payload.topic }}"             >> $GITHUB_OUTPUT
+            echo "voice=${{ github.event.client_payload.voice || 'en-US-AriaNeural' }}" >> $GITHUB_OUTPUT
+            echo "keywords=${{ github.event.client_payload.keywords || '' }}" >> $GITHUB_OUTPUT
+            echo "callback=${{ github.event.client_payload.n8n_callback_url || '' }}" >> $GITHUB_OUTPUT
+          else
+            echo "topic=${{ inputs.topic }}"           >> $GITHUB_OUTPUT
+            echo "voice=${{ inputs.voice }}"           >> $GITHUB_OUTPUT
+            echo "keywords=${{ inputs.keywords }}"     >> $GITHUB_OUTPUT
+            echo "callback=${{ inputs.n8n_callback_url }}" >> $GITHUB_OUTPUT
+          fi
+
+      # ─── Main video generation ─────────────────────────────────────────────
+      - name: 🎬 Generate video
+        id: generate
+        env:
+          TOPIC:          ${{ steps.vars.outputs.topic }}
+          VOICE:          ${{ steps.vars.outputs.voice }}
+          KEYWORDS:       ${{ steps.vars.outputs.keywords }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          GROQ_API_KEY:   ${{ secrets.GROQ_API_KEY }}
+        run: python scripts/generate_video.py
+
+      # ─── Upload to Google Drive ────────────────────────────────────────────
+      - name: ☁️ Upload to Google Drive
+        id: gdrive
+        env:
+          GDRIVE_CREDENTIALS: ${{ secrets.GDRIVE_CREDENTIALS }}
+          GDRIVE_FOLDER_ID:   ${{ secrets.GDRIVE_FOLDER_ID }}
+        run: python scripts/upload_gdrive.py
+        continue-on-error: true   # don't fail the whole job if Drive upload fails
+
+      # ─── Backup: GitHub artifact (kept 7 days) ─────────────────────────────
+      - name: 📁 Save GitHub artifact (7-day backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-${{ github.run_id }}
+          path: |
+            output/final_video.mp4
+            output/script.txt
+            output/voiceover.srt
+          retention-days: 7
+
+      # ─── Notify n8n when done ──────────────────────────────────────────────
+      - name: 📡 Notify n8n (callback)
+        if: steps.vars.outputs.callback != ''
+        run: |
+          GDRIVE_LINK=$(cat output/gdrive_link.txt 2>/dev/null || echo "unavailable")
+          TOPIC_ESCAPED=$(echo "${{ steps.vars.outputs.topic }}" | sed 's/"/\\"/g')
+          curl -s -X POST "${{ steps.vars.outputs.callback }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"status\": \"done\",
+              \"run_id\": \"${{ github.run_id }}\",
+              \"topic\": \"${TOPIC_ESCAPED}\",
+              \"gdrive_link\": \"${GDRIVE_LINK}\",
+              \"artifact_url\": \"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"
+            }"
+          echo "✅ n8n notified"
