@@ -1,0 +1,15 @@
+# ─── Faceless YouTube Bot — Python Dependencies ───────────────────────────────
+# All tools are free and open source.
+
+# Text-to-Speech: Microsoft Edge TTS (no API key, completely free)
+edge-tts>=6.1.9
+
+# Captions: OpenAI Whisper (open source, runs on CPU)
+faster-whisper>=1.1.0
+
+# HTTP requests (Groq + Pexels API calls)
+requests>=2.31.0
+
+# Google Drive upload
+google-auth>=2.23.0
+google-api-python-client>=2.100.0
